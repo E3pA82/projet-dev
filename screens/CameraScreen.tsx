@@ -1,108 +1,92 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Button,
-  Alert,
-} from 'react-native';
-import {
-  CameraView,
-  useCameraPermissions,
-  PermissionResponse,
-  BarcodeScanningResult,
-  CameraType, // Si vous voulez switcher front/back
-} from 'expo-camera'; // Importez CameraView ici !
+import React, { useState, useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
+
+const HUGGING_FACE_TOKEN = process.env.HUGGING_FACE_TOKEN;
+; // ⚠️ mets ta clé ici
 
 const CameraScreen: React.FC = () => {
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const [cameraPermission, setCameraPermission] = useState<PermissionResponse | null>(null);
+  const cameraRef = useRef<CameraView>(null);
 
-  useEffect(() => {
-    // Demandez les permissions au montage du composant
-    requestPermission();
-  }, []);
+ const takePicture = async () => {
+  if (cameraRef.current) {
+    const photo = await cameraRef.current.takePictureAsync({ base64: true });
+    console.log("Photo capturée:", photo.uri);
 
-  useEffect(() => {
-    if (permission) {
-      setCameraPermission(permission);
+    if (photo.base64) {
+      classifyImage(photo.base64);
+    } else {
+      console.error("Erreur: photo.base64 est undefined");
     }
-  }, [permission]);
+  }
+};
 
-  const handleBarCodeScanned = ({ type, data }: BarcodeScanningResult) => {
-    // Évitez les scans multiples en désactivant après le premier
-    if (scanned) return;
-    setScanned(true);
-    Alert.alert(
-      `Scan réussi !`,
-      `Type: ${type}\nDonnées: ${data}`,
-      [{ text: 'OK', onPress: () => setScanned(false) }] // Réactivez pour re-scanner
-    );
-    // Ici, vous pouvez naviguer ou traiter les données (ex: API pour recyclage)
+
+  const classifyImage = async (base64Image: string) => {
+    try {
+      const response = await fetch(
+        "https://api-inference.huggingface.co/models/microsoft/resnet-50",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${HUGGING_FACE_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: `data:image/jpeg;base64,${base64Image}`,
+          }),
+        }
+      );
+
+      const result = await response.json();
+      console.log(result);
+
+      if (result.error) {
+        Alert.alert("Erreur", result.error);
+      } else {
+        const label = result[0].label;
+        Alert.alert("Résultat", `Objet détecté : ${label}`);
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Erreur", "Impossible de contacter l’API");
+    }
   };
 
-  // Si permissions en cours
-  if (cameraPermission === null) {
+  if (!permission?.granted) {
     return (
       <View style={styles.container}>
-        <Text>Demande de permission caméra...</Text>
+        <Text>Autorise la caméra dans les paramètres</Text>
+        <TouchableOpacity onPress={requestPermission}>
+          <Text>Autoriser</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  // Si refusées
-  if (!cameraPermission.granted) {
-    return (
-      <View style={styles.container}>
-        <Text>Accès à la caméra refusé</Text>
-        <Button onPress={requestPermission} title="Demander à nouveau" />
-      </View>
-    );
-  }
-
-  // Caméra active
   return (
     <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing="back" // 'front' ou 'back'
-        barcodeScannerSettings={{
-          barcodeTypes: ['qr', 'pdf417', 'code128'], // Adaptez aux types pour recyclage (ex: QR pour étiquettes)
-        }}
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} // Désactive après scan
-      />
-      {/* Overlay optionnel pour guider l'utilisateur */}
-      <View style={styles.overlay}>
-        <Text style={styles.instruction}>Pointez sur le code-barres/QR</Text>
-      </View>
+      <CameraView ref={cameraRef} style={styles.camera} facing="back" />
+      <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
+        <Text style={styles.captureText}>📸 Scanner Déchet</Text>
+      </TouchableOpacity>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  container: { flex: 1 },
+  camera: { flex: 1 },
+  captureButton: {
+    position: "absolute",
+    bottom: 40,
+    alignSelf: "center",
+    backgroundColor: "#1e90ff",
+    padding: 15,
+    borderRadius: 50,
   },
-  camera: {
-    flex: 1,
-    width: '100%',
-  },
-  overlay: {
-    position: 'absolute',
-    top: '50%',
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 20,
-    borderRadius: 10,
-  },
-  instruction: {
-    color: 'white',
-    fontSize: 16,
-    textAlign: 'center',
-  },
+  captureText: { color: "white", fontWeight: "bold" },
 });
 
 export default CameraScreen;
